@@ -5,8 +5,9 @@ SCRIPT_RESET_COLOR='\033[0m'
 SCRIPT_ERROR_COLOR='\033[1;31m'    # <== bold red
 
 if [ -z "$LOGFILE" ]; then
-    LOGFILE="$(pwd)/$(basename $0)-$(date --iso-8601=minutes).log"
+    LOGFILE="$(pwd)/$(basename $0)-$(date --iso-8601=seconds).log"
 fi
+echo -e "Logging started at $(date)\nin folder \"$(pwd)\"\nwith command: $0 $@\n" >> "$LOGFILE"
 
 
 function LOG {
@@ -30,7 +31,16 @@ function ERROR {
 
 function EXEC {
     REPORT_COLOR "${SCRIPT_CMD_COLOR}" "  + $@\n"
-    eval "$@" >>"$LOGFILE" 2>&1 || ERROR "command failed!"
+    declare -a arg
+    for x in "$@"; do 
+        if [[ "$x" =~ \  ]]; then 
+            arg+=("\"$x\"")
+        else
+            arg+=("$x")
+        fi
+    done
+    { "${arg[@]}"; } >>"$LOGFILE" 2>&1 || { ERROR "command failed!"; exit 1; }
+    return 0
 }
 
 
@@ -44,7 +54,9 @@ function title {
     printf "    $@\n"
     printf "================================================================================${SCRIPT_RESET_COLOR}\n"
 
-    LOG '================================================================================\n'
+    LOG "================================================================================\n"
+    LOG "    $@\n"
+    LOG "================================================================================\n"
 }
 
 
@@ -66,6 +78,10 @@ function inputs_older_than {
 }
 
 
+function __first_element {
+    echo $1
+}
+
 
 # Convenience function to run a step in the preprocessing if
 # outputs are missing or inputs are newer than outputs. 
@@ -76,53 +92,60 @@ function inputs_older_than {
 # where args can be prefixed with IN: (e.g. IN:image.nii) to denote an 
 # input file, or prefixed with OUT: to denote an output
 function run {
-  REPORT_COLOR "$SCRIPT_STEP_COLOR" "> "$1"... "
-  cmd=("$2")
-  shift 2
+    REPORT_COLOR "$SCRIPT_STEP_COLOR" "> "$1"... "
+    cmd=("$2")
+    shift 2
 
-  inputs=()
-  outputs=()
+    declare -a inputs
+    declare -A outputs
 
-  # build list of input & output arguments:
-  for arg in "$@"; do
-    if [[ "$arg" == IN:* ]]; then 
-      arg="${arg#IN:}"
-      inputs+=("$arg")
-      cmd+=("$arg")
-    elif [[ "$arg" == OUT:* ]]; then
-      arg="${arg#OUT:}"
-      outputs+=("$arg")
-      cmd+=("tmp-$arg")
-    else
-      cmd+=("$arg")
-    fi
-  done
-
-  #echo inputs=${inputs[@]}
-  #echo outputs=${outputs[@]}
-
-  # if everything is alread up to date, return now:
-  (( "${#outputs[@]}" )) && { 
-      outputs_exist "${outputs[@]}" && \
-      inputs_older_than "${outputs[0]}" "${inputs[@]}" 
-  } && {
-      REPORT_COLOR "$SCRIPT_STEP_COLOR" "up to date\n"
-      return 0
-  }
-  REPORT_COLOR "" "\n"
-
-  # need to recompute: run command with temporary output names, 
-  # then rename to final output filenames if successful.
-  # This is necessary to ensure no confusion for the next run, 
-  # since the creation of the output shouldn't by itself signify success.
-  EXEC "${cmd[@]}" && {
-    for out in "${outputs[@]}"; do
-      mv "tmp-$out" "$out"
+    # build list of input & output arguments:
+    for arg in "$@"; do
+        if [[ "$arg" == IN:* ]]; then 
+            arg="${arg#IN:}"
+            inputs+=("$arg")
+            cmd+=("$arg")
+        elif [[ "$arg" == OUT:* ]]; then
+            arg="${arg#OUT:}"
+            d="$(dirname "$arg")"
+            f="$(basename "$arg")"
+            outputs["$arg"]="$d/tmp-$f"
+            cmd+=("${outputs["$arg"]}")
+        else
+            cmd+=("$arg")
+        fi
     done
-  }
-  rm -f "tmp-*"
 
-  return $retval
+    #echo inputs=${inputs[@]}
+    #echo outputs="${outputs[@]}"
+
+
+
+    # if everything is alread up to date, return now:
+    (( "${#outputs[@]}" )) && { 
+        outputs_exist "${!outputs[@]}" && \
+        inputs_older_than "$( __first_element "${!outputs[@]}" )" "${inputs[@]}" 
+    } && {
+        REPORT_COLOR "$SCRIPT_STEP_COLOR" "up to date\n"
+        return 0
+    }
+    REPORT_COLOR "" "\n"
+
+    # remove any temporaries to avoid conflicts 
+    rm -f "tmp-*"
+
+    # need to recompute: run command with temporary output names, 
+    # then rename to final output filenames if successful.
+    # This is necessary to ensure no confusion for the next run, 
+    # since the creation of the output shouldn't by itself signify success.
+    EXEC "${cmd[@]}" && {
+        for out in "${!outputs[@]}"; do
+            mv "${outputs["$out"]}" "$out"
+        done
+        return 0
+    }
+
+    return 1
 }
 
 
@@ -134,8 +157,8 @@ function run {
 #   run 'an example command aggregating a lot of input files' \
 #     mrmath $(IN *.nii) mean OUT:mean.nii
 function IN {
-  for x in $@; do
-    echo IN:$x
-  done
+    for x in $@; do
+        echo IN:$x
+    done
 }
 
