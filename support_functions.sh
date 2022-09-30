@@ -96,10 +96,19 @@ function __first_element {
 # outputs are missing or inputs are newer than outputs. 
 #
 # usage:
-#   run 'progress message' cmd [args...]
+#   run 'progress message' \
+#       cmd [args...]
 #
 # where args can be prefixed with IN: (e.g. IN:image.nii) to denote an 
-# input file, or prefixed with OUT: to denote an output
+# input file, or prefixed with OUT: to denote an output.
+#
+# By default, the stdout & stderr of the command won't be printed on the 
+# terminal, but will be recorded in the log file. If you wish to see the 
+# output during execution, you can insert a simple '+' before the command,
+# like so:
+#
+#   run 'progress message' \
+#       + cmd [args...]
 function run {
     REPORT_COLOR "$SCRIPT_STEP_COLOR" "> "$1"... "
     cmd=("$2")
