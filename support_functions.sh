@@ -6,6 +6,8 @@ SCRIPT_ERROR_COLOR='\033[1;31m'    # <== bold red
 
 if [ -z "$LOGFILE" ]; then
     LOGFILE="$(pwd)/$(basename $0)-$(date --iso-8601=seconds).log"
+else
+    LOGFILE="$(realpath "$LOGFILE")"
 fi
 echo -e "Logging started at $(date)\nin folder \"$(pwd)\"\nwith command: $0 $@\n" >> "$LOGFILE"
 
@@ -30,7 +32,9 @@ function ERROR {
 }
 
 function EXEC {
-    REPORT_COLOR "${SCRIPT_CMD_COLOR}" "  + $@\n"
+    unset noquiet
+    [[ "$1" == '+' ]] && { noquiet=1; shift; }
+    REPORT_COLOR "${SCRIPT_CMD_COLOR}" "  > $@\n"
     declare -a arg
     for x in "$@"; do 
         if [[ "$x" =~ \  ]]; then 
@@ -39,7 +43,12 @@ function EXEC {
             arg+=("$x")
         fi
     done
-    { "${arg[@]}"; } >>"$LOGFILE" 2>&1 || { ERROR "command failed!"; exit 1; }
+    if [ "x$noquiet" == "x" ]; then
+        { "${arg[@]}"; } >>"$LOGFILE" 2>&1 
+    else
+        { "${arg[@]}"; } 2>&1 | tee -a "$LOGFILE"
+    fi
+    [[ $? -ne 0 ]] && { ERROR "command failed! see log for details (\"$LOGFILE\")"; exit 1; }
     return 0
 }
 
@@ -103,6 +112,7 @@ function run {
     for arg in "$@"; do
         if [[ "$arg" == IN:* ]]; then 
             arg="${arg#IN:}"
+            [ ! -e "$arg" ] && { ERROR "missing input file \"$arg\""; return 1; }
             inputs+=("$arg")
             cmd+=("$arg")
         elif [[ "$arg" == OUT:* ]]; then
@@ -121,7 +131,8 @@ function run {
 
 
 
-    # if everything is alread up to date, return now:
+
+    # if everything is already up to date, return now:
     (( "${#outputs[@]}" )) && { 
         outputs_exist "${!outputs[@]}" && \
         inputs_older_than "$( __first_element "${!outputs[@]}" )" "${inputs[@]}" 
